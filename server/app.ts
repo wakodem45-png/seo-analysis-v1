@@ -82,20 +82,29 @@ router.get("/presets", (_req, res) => {
   ]);
 });
 
-// Audit Handler with multiple path aliases to support any Vercel rewrite pattern
+// Verbose Audit Handler with structured diagnostic error payload
 const handleAudit = async (req: express.Request, res: express.Response) => {
+  const traceId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const requestStartTime = Date.now();
+
+  console.info(`[${traceId}] >>> [Audit Gateway] Received audit request`);
+
   try {
     let body = req.body;
     // Handle stringified body if Vercel didn't auto-parse JSON
     if (typeof body === "string") {
       try {
         body = JSON.parse(body);
-      } catch (parseErr) {
+      } catch (parseErr: any) {
+        console.error(`[${traceId}] 💥 Body JSON parse error:`, parseErr);
         return res.status(400).json({
+          status: "error",
+          traceId,
           error: "Invalid JSON request payload provided.",
           code: "INVALID_JSON_BODY",
           module: "API Gateway & Load Balancer",
+          message: parseErr?.message || "Failed to parse JSON body string",
+          stack: parseErr?.stack,
         });
       }
     }
@@ -103,64 +112,87 @@ const handleAudit = async (req: express.Request, res: express.Response) => {
     const url = body?.url;
     if (!url || typeof url !== "string" || !url.trim()) {
       return res.status(400).json({
+        status: "error",
+        traceId,
         error: "A valid target website URL is required.",
         code: "INVALID_URL",
         module: "API Gateway & Load Balancer",
+        message: "Request body must include a non-empty string 'url' field.",
       });
     }
 
-    console.info(`[Audit Gateway] Initiating audit pipeline for: ${url.trim()}`);
-    const report = await executeAuditPipeline(url.trim());
+    const trimmedUrl = url.trim();
+    console.info(`[${traceId}] [Audit Gateway] Initiating 7-module audit pipeline for: ${trimmedUrl}`);
+    
+    const report = await executeAuditPipeline(trimmedUrl);
     const duration = Date.now() - requestStartTime;
-    console.info(`[Audit Gateway] Audit pipeline succeeded in ${duration}ms for: ${url.trim()}`);
+    console.info(`[${traceId}] [Audit Gateway] <<< Pipeline completed successfully in ${duration}ms for: ${trimmedUrl}`);
     return res.json(report);
   } catch (error: any) {
     const duration = Date.now() - requestStartTime;
-    console.error(`[Audit Gateway] Pipeline execution failed after ${duration}ms:`, error);
+    console.error(`[${traceId}] 💥 [Audit Gateway] Pipeline execution failed after ${duration}ms:`, {
+      message: error?.message,
+      name: error?.name,
+      stack: error?.stack,
+      cause: error?.cause,
+      module: error?.module,
+    });
 
     const errorMessage = error?.message || "An unexpected error occurred during SEO audit execution.";
     const failedModule = error?.module || "Core Orchestrator";
     const statusCode = error?.statusCode || 500;
 
     return res.status(statusCode).json({
+      status: "error",
+      traceId,
       error: errorMessage,
+      message: errorMessage,
       failedModule,
       durationMs: duration,
       timestamp: new Date().toISOString(),
+      stack: error?.stack,
+      envCheck: {
+        hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+        nodeEnv: process.env.NODE_ENV || "development",
+      },
       actionableGuidance: !process.env.GEMINI_API_KEY
-        ? "GEMINI_API_KEY environment variable is not configured in your Vercel Project Settings."
-        : "Check server logs for upstream crawling network constraints or API rate limits.",
+        ? "GEMINI_API_KEY environment variable is missing in Vercel Project Settings > Environment Variables."
+        : "The upstream target host may be blocking scraping requests or experiencing network latency.",
     });
   }
 };
 
-// Map audit route on router
+// Map audit route on router and direct path
 router.post(["/audit", "/"], handleAudit);
 app.post("/api/audit", handleAudit);
 
 // Mount router on /api
 app.use("/api", router);
 
-// Catch-all 404 handler ONLY for unknown /api/* routes (so Vite/frontend can serve / and assets)
+// Catch-all 404 handler ONLY for unknown /api/* routes (leaves /, /index.html, and assets for frontend)
 router.use((req, res) => {
   res.status(404).json({
+    status: "error",
     error: `API route not found: ${req.method} ${req.originalUrl || req.url}`,
     code: "ROUTE_NOT_FOUND",
     module: "API Gateway",
   });
 });
 
-// Global Express Error Middleware (catches synchronous & async errors)
+// Global Express Error Middleware (catches synchronous & async unhandled throws)
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("[Global Error Middleware Caught]", err);
   if (res.headersSent) {
     return next(err);
   }
   res.status(err?.statusCode || err?.status || 500).json({
+    status: "error",
     error: err?.message || "Internal server error occurred.",
+    message: err?.message || "Internal server error occurred.",
     code: err?.code || "INTERNAL_SERVER_ERROR",
     failedModule: err?.module || "Core Orchestrator",
-    details: process.env.NODE_ENV !== "production" ? err?.stack : undefined,
+    stack: err?.stack,
+    details: err?.details || undefined,
   });
 });
 
