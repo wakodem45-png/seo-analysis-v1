@@ -9,6 +9,17 @@
     <meta property="og:description" content="Automated SEO analysis system with crawling engine, deterministic rules validator, AI/NLP search intent profiler, and prioritized audit reporting." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Gracefully prevent unhandled rejection overlays from benign Vite HMR / WebSocket connection events
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && (event.reason || event);
+        var msg = (reason && (reason.message || reason.description || (typeof reason === 'string' ? reason : reason.toString()))) || '';
+        if (typeof msg === 'string' && (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1)) {
+          event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
