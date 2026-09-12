@@ -1,0 +1,6 @@
+{
+  "name": "SEO Audit Engine",
+  "description": "Automated SEO analysis system with crawling engine, deterministic rules validator, AI/NLP search intent profiler, and prioritized audit reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
